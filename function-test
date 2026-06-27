@@ -1,0 +1,141 @@
+// simple-api/server.js
+import express from 'express';
+import bcrypt from 'bcrypt';
+import jwt from 'jsonwebtoken';
+
+const app = express();
+app.use(express.json());
+
+const PORT = 3000;
+
+// Secret for JWT (in real apps NEVER hardcode this)
+const JWT_SECRET = 'super-secret-key';
+
+// In-memory data stores
+let users = [];        // { id, name, email, passwordHash }
+let posts = [];        // { id, userId, content }
+
+// Helper: authenticate middleware
+function authenticate(req, res, next) {
+    const authHeader = req.headers.authorization;
+
+    if (!authHeader)
+        return res.status(401).json({ message: 'Missing Authorization header' });
+
+    const token = authHeader.split(' ')[1];
+    if (!token)
+        return res.status(401).json({ message: 'Invalid Authorization format' });
+
+    try {
+        const payload = jwt.verify(token, JWT_SECRET);
+        req.user = payload; // attach decoded user info
+        next();
+    } catch {
+        res.status(401).json({ message: 'Invalid or expired token' });
+    }
+}
+
+// AUTH ROUTES
+
+// REGISTER
+app.post('/api/register', async (req, res) => {
+    const { name, email, password } = req.body;
+
+    // Requires name, email and password
+    if (!name || !email || !password)
+        return res.status(400).json({ message: 'All fields are required' });
+
+    // Requires email that is not registered yet
+    if (users.find(u => u.email === email))
+        return res.status(409).json({ message: 'Email already exists' });
+
+    const passwordHash = await bcrypt.hash(password, 10);
+
+    const newUser = {
+        id: users.length + 1,
+        name,
+        email,
+        passwordHash
+    };
+
+    users.push(newUser);
+    
+    // Return 201 and user information on success
+    res.status(201).json({ id: newUser.id, name, email });
+});
+
+
+// LOGIN
+app.post('/api/login', async (req, res) => {
+    const { email, password } = req.body;
+
+    const user = users.find(u => u.email === email);
+    if (!user)
+        return res.status(401).json({ message: 'Invalid credentials' });
+
+    const isValid = await bcrypt.compare(password, user.passwordHash);
+    if (!isValid)
+        return res.status(401).json({ message: 'Invalid credentials' });
+
+    const token = jwt.sign(
+        { id: user.id, email: user.email },
+        JWT_SECRET,
+        { expiresIn: '1h' }
+    );
+
+    res.json({ token });
+});
+
+
+// GET PROFILE (protected)
+app.get('/api/profile', authenticate, (req, res) => {
+    const user = users.find(u => u.id === req.user.id);
+    res.json({
+        id: user.id,
+        name: user.name,
+        email: user.email
+    });
+});
+
+// POSTS ROUTES
+
+// CREATE POST (protected)
+app.post('/api/posts', authenticate, (req, res) => {
+    const { content } = req.body;
+
+    if (!content)
+        return res.status(400).json({ message: 'Content is required' });
+
+    const newPost = {
+        id: posts.length + 1,
+        userId: req.user.id,
+        content
+    };
+
+    posts.push(newPost);
+    res.status(201).json(newPost);
+});
+
+// GET POST (protected)
+app.get('/api/posts/:id', authenticate, (req, res) => {
+    const post = posts.find(p => p.id === parseInt(req.params.id));
+
+    if (!post)
+        return res.status(404).json({ message: 'Post not found' });
+
+    res.json(post);
+});
+
+
+// Default 404
+app.use((req, res) => {
+    res.status(404).json({ message: 'Not Found' });
+});
+
+
+// Start server
+app.listen(PORT, () => {
+    console.log(`Server running at http://localhost:${PORT}`);
+});
+
+export default app;

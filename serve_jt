@@ -1,0 +1,32 @@
+const isBrowser = typeof window !== 'undefined' && typeof localStorage !== 'undefined';
+
+export class ApiService {
+  private baseUrl = 'http://localhost:3000/api';
+  loggedIn = isBrowser && !!localStorage.getItem('token');
+
+  get token(): string | null {
+    return isBrowser ? localStorage.getItem('token') : null;
+  }
+
+  async login(username: string, password: string): Promise<{ token: string; username: string }> {
+    const response = await fetch(`${this.baseUrl}/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, password }),
+    });
+
+    if (!response.ok) {
+      throw new Error(`Login failed: ${response.statusText}`);
+    }
+
+    const data = (await response.json()) as { token: string; username: string };
+
+    if (isBrowser) {
+      localStorage.setItem('token', data.token);
+      this.loggedIn = true;
+    }
+
+    return data;
+  }
+}
+            
